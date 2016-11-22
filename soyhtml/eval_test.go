@@ -3,8 +3,8 @@ package soyhtml
 import (
 	"testing"
 
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/parse"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/parse"
 )
 
 func TestEvalExpr(t *testing.T) {
@@ -18,7 +18,7 @@ func TestEvalExpr(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		var tree, err = parse.SoyFile("", "{"+test.input+"}", nil)
+		var tree, err = parse.SoyFile("", "{"+test.input+"}")
 		if err != nil {
 			t.Error(err)
 			return

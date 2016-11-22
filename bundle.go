@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/parse"
-	"github.com/robfig/soy/parsepasses"
-	"github.com/robfig/soy/soyhtml"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/parse"
+	"github.com/DarkDNA/soy/parsepasses"
+	"github.com/DarkDNA/soy/soyhtml"
+	"github.com/DarkDNA/soy/template"
 	"gopkg.in/fsnotify.v0"
 )
 
@@ -26,10 +26,11 @@ type soyFile struct{ name, content string }
 // Bundle is a collection of soy content (templates and globals).  It acts as
 // input for the soy compiler.
 type Bundle struct {
-	files   []soyFile
-	globals data.Map
-	err     error
-	watcher *fsnotify.Watcher
+	files                 []soyFile
+	globals               data.Map
+	err                   error
+	watcher               *fsnotify.Watcher
+	recompilationCallback func(*template.Registry)
 }
 
 // NewBundle returns an empty bundle.
@@ -117,6 +118,13 @@ func (b *Bundle) AddGlobalsMap(globals data.Map) *Bundle {
 	return b
 }
 
+// SetRecompilationCallback assigns the bundle a function to call after
+// recompilation.  This is called before updating the in-use registry.
+func (b *Bundle) SetRecompilationCallback(c func(*template.Registry)) *Bundle {
+	b.recompilationCallback = c
+	return b
+}
+
 // Compile parses all of the soy files in this bundle, verifies a number of
 // rules about data references, and returns the completed template registry.
 func (b *Bundle) Compile() (*template.Registry, error) {
@@ -127,7 +135,7 @@ func (b *Bundle) Compile() (*template.Registry, error) {
 	// Compile all the soy (globals are already parsed)
 	var registry = template.Registry{}
 	for _, soyfile := range b.files {
-		var tree, err = parse.SoyFile(soyfile.name, soyfile.content, b.globals)
+		var tree, err = parse.SoyFile(soyfile.name, soyfile.content)
 		if err != nil {
 			return nil, err
 		}
@@ -137,10 +145,13 @@ func (b *Bundle) Compile() (*template.Registry, error) {
 	}
 
 	// Apply the post-parse processing
-	var err = parsepasses.CheckDataRefs(registry)
-	if err != nil {
+	if err := parsepasses.CheckDataRefs(registry); err != nil {
 		return nil, err
 	}
+	if err := parsepasses.SetGlobals(registry, b.globals); err != nil {
+		return nil, err
+	}
+	parsepasses.ProcessMessages(registry)
 
 	if b.watcher != nil {
 		go b.recompiler(&registry)
@@ -179,6 +190,10 @@ func (b *Bundle) recompiler(reg *template.Registry) {
 			if err != nil {
 				Logger.Println(err)
 				continue
+			}
+
+			if b.recompilationCallback != nil {
+				b.recompilationCallback(registry)
 			}
 
 			// update the existing template registry.

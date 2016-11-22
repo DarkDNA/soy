@@ -3,8 +3,8 @@ package soyhtml
 import (
 	"io/ioutil"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/data"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/data"
 )
 
 // EvalExpr evaluates the given expression node and returns the result.  The

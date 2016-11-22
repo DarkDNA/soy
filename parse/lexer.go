@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/robfig/soy/ast"
+	"github.com/DarkDNA/soy/ast"
 )
 
 // Lexer design from text/template
@@ -63,6 +63,7 @@ const (
 
 	// Data ref access tokens
 	itemIdent            // identifier (e.g. function name)
+	itemTypeIdent        // any, string, list<foo>, etc.
 	itemDollarIdent      // $ident
 	itemDotIdent         // .ident
 	itemQuestionDotIdent // ?.ident
@@ -102,31 +103,34 @@ const (
 	itemComment             // line comments (//) or block comments (/*)
 
 	// Commands
-	itemCommand     // used only to delimit the commands
-	itemAlias       // {alias ...}
-	itemCall        // {call ...}
-	itemCase        // {case ...}
-	itemCss         // {css ...}
-	itemDefault     // {default}
-	itemDelcall     // {delcall ...}
-	itemDelpackage  // {delpackage ...}
-	itemDeltemplate // {deltemplate ...}
-	itemElse        // {else}
-	itemElseif      // {elseif ...}
-	itemFor         // {for ...}
-	itemForeach     // {foreach ...}
-	itemIf          // {if ...}
-	itemIfempty     // {ifempty}
-	itemLet         // {let}
-	itemLiteral     // {literal}
-	itemMsg         // {msg ...}
-	itemNamespace   // {namespace}
-	itemParam       // {param ...}
-	itemPrint       // {print ...}
-	itemSwitch      // {switch ...}
-	itemTemplate    // {template ...}
-	itemLog         // {log}
-	itemDebugger    // {debugger}
+	itemCommand             // used only to delimit the commands
+	itemAlias               // {alias ...}
+	itemCall                // {call ...}
+	itemCase                // {case ...}
+	itemCss                 // {css ...}
+	itemDefault             // {default}
+	itemDelcall             // {delcall ...}
+	itemDelpackage          // {delpackage ...}
+	itemDeltemplate         // {deltemplate ...}
+	itemElse                // {else}
+	itemElseif              // {elseif ...}
+	itemFor                 // {for ...}
+	itemForeach             // {foreach ...}
+	itemIf                  // {if ...}
+	itemIfempty             // {ifempty}
+	itemLet                 // {let}
+	itemLiteral             // {literal}
+	itemMsg                 // {msg ...}
+	itemNamespace           // {namespace}
+	itemParam               // {param ...}
+	itemPlural              // {plural ...}
+	itemPrint               // {print ...}
+	itemSwitch              // {switch ...}
+	itemTemplate            // {template ...}
+	itemLog                 // {log}
+	itemDebugger            // {debugger}
+	itemDefineParam         // {@param ...}
+	itemDefineOptionalParam // {@param? ...}
 	// Character commands.
 	itemSpecialChar
 	itemSpace          // {sp}
@@ -148,6 +152,7 @@ const (
 	itemLiteralEnd     // {/literal}
 	itemMsgEnd         // {/msg}
 	itemParamEnd       // {/param}
+	itemPluralEnd      // {/plural}
 	itemSwitchEnd      // {/switch}
 	itemTemplateEnd    // {/template}
 	itemLogEnd         // {/log}
@@ -183,9 +188,11 @@ var builtinIdents = map[string]itemType{
 	"msg":       itemMsg,
 	"namespace": itemNamespace,
 	"param":     itemParam,
+	"plural":    itemPlural,
 	"print":     itemPrint,
 	"switch":    itemSwitch,
 	"template":  itemTemplate,
+	"@param":    itemDefineParam,
 
 	"/call":        itemCallEnd,
 	"/delcall":     itemDelcallEnd,
@@ -198,6 +205,7 @@ var builtinIdents = map[string]itemType{
 	"/log":         itemLogEnd,
 	"/msg":         itemMsgEnd,
 	"/param":       itemParamEnd,
+	"/plural":      itemPluralEnd,
 	"/switch":      itemSwitchEnd,
 	"/template":    itemTemplateEnd,
 
@@ -269,6 +277,7 @@ func (t itemType) String() string {
 		itemDollarIdent:      "<$ident>",
 		itemDotIdent:         "<.ident>",
 		itemQuestionDotIdent: "<?.ident>",
+		itemTypeIdent:        "<type>",
 		itemDotIndex:         "<.N>",
 		itemQuestionDotIndex: "<?.N>",
 		itemLeftBracket:      "[",
@@ -314,6 +323,12 @@ type lexer struct {
 // nextItem returns the next item from the input.
 func (l *lexer) nextItem() item {
 	return <-l.items
+}
+
+// drain drains the output so the lexing goroutine will exit.
+func (l *lexer) drain() {
+	for _ = range l.items {
+	}
 }
 
 // lex creates a new scanner for the input string.
@@ -548,6 +563,9 @@ func lexInsideTag(l *lexer) stateFn {
 	switch r := l.next(); {
 	case isSpaceEOL(r):
 		l.ignore()
+	case r == '@':
+		l.backup()
+		return lexIdent
 	case r == '/' && l.peek() == '}':
 		return lexRightDelimEnd
 	case r == '$', r == '.':
@@ -719,6 +737,95 @@ func lexSoyDocParam(l *lexer) {
 	}
 }
 
+// lexParam parses a {@param ...} tag.
+func lexParam(l *lexer) stateFn {
+	switch ch := l.next(); {
+	case ch == '?':
+		if l.next() != ' ' {
+			return l.errorf("Expected ' ' after '@param?'")
+		}
+		l.backup()
+		l.emit(itemDefineOptionalParam)
+	case ch == ' ':
+		l.backup()
+		l.emit(itemDefineParam)
+
+	default:
+		return l.errorf("Unexpected character %#U in {@param ...} block.", ch)
+	}
+
+	// skip all spaces
+	for {
+		var r = l.next()
+		if r == eof || !isSpace(r) {
+			break
+		}
+	}
+	l.backup()
+	l.ignore()
+
+	for {
+		var r = l.next()
+		if !isAlphaNumeric(r) {
+			l.backup()
+			l.emit(itemIdent)
+
+			break
+		}
+	}
+
+	// skip all spaces
+	for {
+		var r = l.next()
+		if r == eof || !isSpace(r) || r == ':' {
+			break
+		}
+	}
+	l.backup()
+	l.ignore()
+
+	if ch := l.next(); ch != ':' {
+		return l.errorf("Expected ':' got %#U", ch)
+	}
+	l.ignore()
+
+	// skip all spaces
+	for {
+		var r = l.next()
+		if r == eof || !isSpace(r) {
+			break
+		}
+	}
+	l.backup()
+	l.ignore()
+
+	for {
+		var r = l.next()
+		if r == '}' || r == eof {
+			l.backup()
+			l.emit(itemTypeIdent)
+
+			break
+		}
+	}
+
+	// skip all spaces
+	for {
+		var r = l.next()
+		if r == eof || !isSpace(r) || r == '}' {
+			break
+		}
+	}
+	l.backup()
+	l.ignore()
+
+	if ch := l.next(); ch != '}' {
+		return l.errorf("Expected '}' got %#U", ch)
+	}
+
+	return lexRightDelim
+}
+
 // "//" has just been read
 func lexLineComment(l *lexer) stateFn {
 	for {
@@ -797,6 +904,8 @@ func lexIdent(l *lexer) stateFn {
 			itemType = itemQuestionDotIdent
 		}
 		l.backup()
+	case '@':
+		itemType = itemDefineParam
 	}
 
 	// absorb the rest of the identifier
@@ -804,6 +913,10 @@ func lexIdent(l *lexer) stateFn {
 	}
 	l.backup()
 	word := l.input[l.start:l.pos]
+
+	if itemType == itemDefineParam && word == "@param" {
+		return lexParam
+	}
 
 	// if it's a builtin, return that item type
 	if itemType, ok := builtinIdents[word]; ok {

@@ -4,36 +4,36 @@ package parse
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/data"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/data"
 )
 
 // tree is the parsed representation of a single soy file.
 type tree struct {
-	name      string                // name provided for the input
-	root      *ast.ListNode         // top-level root of the tree
-	text      string                // the full input text
-	lex       *lexer                // lexer provides a sequence of tokens
-	token     [2]item               // two-token lookahead
-	peekCount int                   // how many tokens have we backed up?
-	namespace string                // the current namespace, for fully-qualifying template.
-	aliases   map[string]string     // map from alias to namespace e.g. {"c": "a.b.c"}
-	globals   map[string]data.Value // global (compile-time constants) values by name
+	name      string            // name provided for the input
+	root      *ast.ListNode     // top-level root of the tree
+	text      string            // the full input text
+	lex       *lexer            // lexer provides a sequence of tokens
+	token     [2]item           // two-token lookahead
+	peekCount int               // how many tokens have we backed up?
+	namespace string            // the current namespace, for fully-qualifying template.
+	aliases   map[string]string // map from alias to namespace e.g. {"c": "a.b.c"}
+	inmsg     bool              // true while parsing children of a message node.
 }
 
 // SoyFile parses the input into a SoyFileNode (the AST).
 // The result may be used as input to a soy backend to generate HTML or JS.
-func SoyFile(name, text string, globals data.Map) (node *ast.SoyFileNode, err error) {
+func SoyFile(name, text string) (node *ast.SoyFileNode, err error) {
 	var t = &tree{
 		name:    name,
 		text:    text,
 		aliases: make(map[string]string),
-		globals: globals,
 		lex:     lex(name, text),
 	}
 	defer t.recover(&err)
@@ -132,14 +132,24 @@ func (t *tree) beginTag() ast.Node {
 		return t.parseNamespace(token)
 	case itemTemplate:
 		return t.parseTemplate(token)
+	case itemDefineParam:
+		return t.parseParamDecl(token, false)
+	case itemDefineOptionalParam:
+		return t.parseParamDecl(token, true)
 	case itemIf:
+		t.notmsg(token)
 		return t.parseIf(token)
 	case itemMsg:
+		t.notmsg(token)
 		return t.parseMsg(token)
+	case itemPlural:
+		return t.parsePlural(token)
 	case itemForeach, itemFor:
+		t.notmsg(token)
 		return t.parseFor(token)
 	case itemSwitch:
-		return t.parseSwitch(token)
+		t.notmsg(token)
+		return t.parseSwitch(token, itemSwitchEnd)
 	case itemCall:
 		return t.parseCall(token)
 	case itemLiteral:
@@ -232,11 +242,14 @@ func (t *tree) parseAlias(token item) {
 // "let" has just been read.
 func (t *tree) parseLet(token item) ast.Node {
 	var name = t.expect(itemDollarIdent, "let")
-	switch next := t.next(); next.typ {
-	case itemColon:
+	if t.peek().typ == itemColon {
+		t.next()
 		var node = &ast.LetValueNode{token.pos, name.val[1:], t.parseExpr(0)}
 		t.expect(itemRightDelimEnd, "let")
 		return node
+	}
+	t.parseAttrs("kind")
+	switch next := t.next(); next.typ {
 	case itemRightDelim:
 		var node = &ast.LetContentNode{token.pos, name.val[1:], t.itemList(itemLetEnd)}
 		t.expect(itemRightDelim, "let")
@@ -269,6 +282,7 @@ func (t *tree) parseCall(token item) ast.Node {
 	switch tok := t.next(); tok.typ {
 	case itemDotIdent:
 		templateName = tok.val
+
 	case itemIdent:
 		// this ident could either be {call fully.qualified.name} or attributes.
 		switch tok2 := t.next(); tok2.typ {
@@ -315,6 +329,7 @@ func (t *tree) parseCall(token item) ast.Node {
 	switch tok := t.next(); tok.typ {
 	case itemRightDelimEnd:
 		return &ast.CallNode{token.pos, templateName, allData, dataNode, nil}
+
 	case itemRightDelim:
 		body := t.parseCallParams()
 		t.expect(itemLeftDelim, "call")
@@ -371,23 +386,28 @@ func (t *tree) parseCallParams() []ast.Node {
 			key = firstIdent.val
 			value = t.parseExpr(0)
 			t.expect(itemRightDelimEnd, "param")
-			params = append(params, &ast.CallParamValueNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamValueNode{initial.pos, key, value, ""})
 			continue
+
 		case itemRightDelim:
 			key = firstIdent.val
 			value = t.itemList(itemParamEnd)
 			t.expect(itemRightDelim, "param")
-			params = append(params, &ast.CallParamContentNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamContentNode{initial.pos, key, value, ""})
 			continue
+
 		case itemIdent:
 			key = firstIdent.val
 			t.backup()
+
 		case itemEquals:
 			t.backup2(firstIdent)
+
 		default:
 			t.unexpected(tok, "param. (expected ':', '}', or '=')")
 		}
 
+		
 		attrs := t.parseAttrs("key", "value", "kind")
 		var ok bool
 		if key == "" {
@@ -400,17 +420,17 @@ func (t *tree) parseCallParams() []ast.Node {
 			t.expect(itemRightDelim, "param")
 			value = t.itemList(itemParamEnd)
 			t.expect(itemRightDelim, "param")
-			params = append(params, &ast.CallParamContentNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamContentNode{initial.pos, key, value, attrs["kind"]})
 		} else {
 			value = t.parseQuotedExpr(valueStr)
 			t.expect(itemRightDelimEnd, "param")
-			params = append(params, &ast.CallParamValueNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamValueNode{initial.pos, key, value, attrs["kind"]})
 		}
 	}
 }
 
 // "switch" has just been read.
-func (t *tree) parseSwitch(token item) ast.Node {
+func (t *tree) parseSwitch(token item, end itemType) ast.Node {
 	const ctx = "switch"
 	var switchValue = t.parseExpr(0)
 	t.expect(itemRightDelim, ctx)
@@ -426,7 +446,7 @@ func (t *tree) parseSwitch(token item) ast.Node {
 			t.unexpected(tok, "between switch cases")
 		case itemCase, itemDefault:
 			cases = append(cases, t.parseCase(tok))
-		case itemSwitchEnd:
+		case end:
 			t.expect(itemRightDelim, ctx)
 			return &ast.SwitchNode{token.pos, switchValue, cases}
 		}
@@ -444,7 +464,7 @@ func (t *tree) parseCase(token item) *ast.SwitchCaseNode {
 		case itemComma:
 			continue
 		case itemRightDelim:
-			var body = t.itemList(itemCase, itemDefault, itemSwitchEnd)
+			var body = t.itemList(itemCase, itemDefault, itemSwitchEnd, itemPluralEnd)
 			t.backup()
 			return &ast.SwitchCaseNode{token.pos, values, body}
 		default:
@@ -511,6 +531,14 @@ func (t *tree) parseIf(token item) ast.Node {
 	}
 }
 
+func (t *tree) parseParamDecl(token item, optional bool) ast.Node {
+	name := t.expect(itemIdent, "param name")
+	typ := t.expect(itemTypeIdent, "param type")
+	t.expect(itemRightDelim, "right delim")
+
+	return &ast.ParamDeclNode{token.pos, optional, name.val, typ.val}
+}
+
 func (t *tree) parseSoyDoc(token item) ast.Node {
 	var params []*ast.SoyDocParamNode
 	for {
@@ -573,9 +601,122 @@ func (t *tree) parseMsg(token item) ast.Node {
 		t.errorf("Tag 'msg' must have a 'desc' attribute")
 	}
 	t.expect(itemRightDelim, ctx)
-	var node = &ast.MsgNode{token.pos, attrs["desc"], t.itemList(itemMsgEnd)}
+
+	// Parse the message body.
+	t.inmsg = true
+	var contents = t.itemList(itemMsgEnd)
+	t.inmsg = false
+
+	// Replace children nodes with placeholders.
+	var node = &ast.MsgNode{token.pos, 0, attrs["meaning"], attrs["desc"], t.placeholderize(contents)}
+
+	// Validate: if there's a plural tag, it should be the only child
+	var hasPlural = false
+	for _, child := range node.Body.Children() {
+		if _, ok := child.(*ast.MsgPluralNode); ok {
+			hasPlural = true
+		}
+	}
+	if hasPlural && len(node.Body.Children()) != 1 {
+		t.errorf("content not allowed outside plural tag")
+	}
+
 	t.expect(itemRightDelim, ctx)
 	return node
+}
+
+// "plural" has just been read
+func (t *tree) parsePlural(tok item) ast.Node {
+	const ctx = "plural"
+	if !t.inmsg {
+		t.unexpected(tok, "not in msg")
+	}
+
+	// plural and switch nodes have the same structure.
+	// BUG: the location quoted the erorr messages will not be correct.
+	var sw = t.parseSwitch(tok, itemPluralEnd).(*ast.SwitchNode)
+	var defaultNode ast.ParentNode
+	var cases []*ast.MsgPluralCaseNode
+	for _, node := range sw.Cases {
+		if len(node.Values) == 0 {
+			defaultNode = node.Body.(ast.ParentNode)
+		} else {
+			var intNode, ok = node.Values[0].(*ast.IntNode)
+			if !ok || len(node.Values) > 1 {
+				t.errorf("plural case must be a single integer, got %v", node.Values)
+			}
+			cases = append(cases, &ast.MsgPluralCaseNode{node.Pos, int(intNode.Value), node.Body.(ast.ParentNode)})
+		}
+	}
+	if defaultNode == nil {
+		t.errorf("{default} case required")
+	}
+	return &ast.MsgPluralNode{sw.Pos, "", sw.Value, cases, defaultNode}
+}
+
+// placeholderize wraps all children of the given node in placeholders as
+// necessary.  the new list of children nodes is returned.
+func (t *tree) placeholderize(parent ast.ParentNode) *ast.ListNode {
+	// Wrap the children in Placeholder nodes unless they are RawText
+	var r []ast.Node
+	for _, child := range parent.Children() {
+		switch child := child.(type) {
+		case *ast.RawTextNode:
+			r = append(r, t.parseMsgRawText(child)...)
+		case *ast.MsgPluralNode:
+			var cases []*ast.MsgPluralCaseNode
+			for _, pc := range child.Cases {
+				cases = append(cases,
+					&ast.MsgPluralCaseNode{pc.Pos, pc.Value, t.placeholderize(pc.Body.(*ast.ListNode))})
+			}
+			r = append(r, &ast.MsgPluralNode{child.Pos, "", child.Value, cases, t.placeholderize(child.Default.(*ast.ListNode))})
+		default:
+			r = append(r, &ast.MsgPlaceholderNode{child.Position(), "", child})
+		}
+	}
+	return &ast.ListNode{parent.Position(), r}
+}
+
+var (
+	htmlTagRegexp    = regexp.MustCompile(`</?[a-zA-Z0-9]+[^>]*?>`)
+	phnameAttrRegexp = regexp.MustCompile(`\sphname="([^"]*)"`)
+)
+
+// parseMsgRawText returns a sequence of text and html placeholder nodes for the
+// given raw text.
+func (t *tree) parseMsgRawText(node *ast.RawTextNode) []ast.Node {
+	var (
+		r   []ast.Node
+		txt = node.Text
+		pos = node.Position()
+	)
+	for len(txt) > 0 {
+		var start, end = len(txt), len(txt)
+		var ii = htmlTagRegexp.FindSubmatchIndex(txt)
+		if ii != nil {
+			start, end = ii[0], ii[1]
+		}
+
+		if start > 0 {
+			r = append(r, &ast.RawTextNode{pos, txt[:start]})
+			pos += ast.Pos(start)
+		}
+
+		if end > start {
+			r = append(r, &ast.MsgPlaceholderNode{pos, "", &ast.MsgHtmlTagNode{pos, txt[start:end]}})
+			pos += ast.Pos(end - start)
+		}
+
+		txt = txt[end:]
+	}
+	return r
+}
+
+// notmsg asserts that the parser is not currently within a message node
+func (t *tree) notmsg(tok item) {
+	if t.inmsg {
+		t.unexpected(tok, "msg")
+	}
 }
 
 func (t *tree) parseNamespace(token item) ast.Node {
@@ -621,7 +762,7 @@ func (t *tree) parseAutoescape(attrs map[string]string) ast.AutoescapeType {
 func (t *tree) parseTemplate(token item) ast.Node {
 	const ctx = "template tag"
 	var id = t.expect(itemDotIdent, ctx)
-	var attrs = t.parseAttrs("autoescape", "private")
+	var attrs = t.parseAttrs("autoescape", "private", "kind")
 	var autoescape = t.parseAutoescape(attrs)
 	var private = t.boolAttr(attrs, "private", false)
 	t.expect(itemRightDelim, ctx)
@@ -665,9 +806,9 @@ func (t *tree) boolAttr(attrs map[string]string, key string, defaultValue bool) 
 // parseQuotedExpr ignores the current lex/parse state and parses the given
 // string as a standalone expression.
 func (t *tree) parseQuotedExpr(str string) ast.Node {
-	return (&tree{
-		lex: lexExpr("", str),
-	}).parseExpr(0)
+	var tt = &tree{lex: lexExpr("", str)}
+	defer tt.lex.drain()
+	return tt.parseExpr(0)
 }
 
 var precedence = map[itemType]int{
@@ -990,11 +1131,7 @@ func (t *tree) newGlobalNode(tok, next item) ast.Node {
 		next = t.next()
 	}
 	t.backup()
-	if value, ok := t.globals[name]; ok {
-		return &ast.GlobalNode{tok.pos, name, value}
-	}
-	t.errorf("global %q is undefined", name)
-	return nil
+	return &ast.GlobalNode{tok.pos, name, data.Undefined{}}
 }
 
 func (t *tree) newFunctionNode(tok item) ast.Node {
@@ -1069,6 +1206,7 @@ func (t *tree) recover(errp *error) {
 	if _, ok := e.(runtime.Error); ok {
 		panic(e)
 	}
+	t.lex.drain()
 	t.lex = nil
 	if str, ok := e.(string); ok {
 		*errp = errors.New(str)

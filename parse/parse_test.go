@@ -6,8 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/data"
+	"github.com/DarkDNA/soy/ast"
 )
 
 type parseTest struct {
@@ -25,7 +24,7 @@ func newList(pos ast.Pos) *ast.ListNode {
 	return &ast.ListNode{Pos: pos}
 }
 
-func tList(nodes ...ast.Node) ast.Node {
+func tList(nodes ...ast.Node) *ast.ListNode {
 	n := newList(0)
 	n.Nodes = nodes
 	return n
@@ -46,6 +45,10 @@ func newText(pos ast.Pos, text string) *ast.RawTextNode {
 	return &ast.RawTextNode{Pos: pos, Text: []byte(text)}
 }
 
+func htmltag(text string) *ast.MsgPlaceholderNode {
+	return &ast.MsgPlaceholderNode{Pos: 0, Body: &ast.MsgHtmlTagNode{Pos: 0, Text: []byte(text)}}
+}
+
 func bin(n1, n2 ast.Node) ast.BinaryOpNode {
 	return ast.BinaryOpNode{Arg1: n1, Arg2: n2}
 }
@@ -60,7 +63,7 @@ var parseTests = []parseTest{
 	{"empty template", "{template .name}{/template}", tFile(tTemplate(".name"))},
 	{"text template", "{template .name}\nHello world!\n{/template}",
 		tFile(tTemplate(".name", newText(0, "Hello world!")))},
-	{"variable template", "{template .name}\nHello {$name}!\n{/template}",
+	{"variable template", "{template .name kind=\"text\"}\nHello {$name}!\n{/template}",
 		tFile(tTemplate(".name",
 			newText(0, "Hello "),
 			&ast.PrintNode{0, &ast.DataRefNode{0, "name", nil}, nil}, // implicit print
@@ -92,6 +95,16 @@ var parseTests = []parseTest{
 	{"soydoc - one line", "/** @param name */", tFile(&ast.SoyDocNode{0, []*ast.SoyDocParamNode{
 		{0, "name", false},
 	}})},
+	{"param directive", "{template .test}{@param hello: string}{/template}", tFile(&ast.TemplateNode{
+		0, ".test",
+		&ast.ListNode{
+			0,
+			[]ast.Node{
+				&ast.ParamDeclNode{0, false, "hello", "string"},
+			},
+		},
+		ast.AutoescapeUnspecified, false,
+	})},
 
 	{"rawtext (linejoin)", "\n  a \n\tb\r\n  c  \n\n", tFile(newText(0, "a b c"))},
 	{"rawtext+html", "\n  a <br>\n\tb\r\n\n  c\n\n<br> ", tFile(newText(0, "a <br>b c<br> "))},
@@ -159,8 +172,8 @@ var parseTests = []parseTest{
 
 	{"debugger", "{debugger}", tFile(&ast.DebuggerNode{0})},
 	{"global", "{GLOBAL_STR}{app.GLOBAL}", tFile(
-		&ast.PrintNode{0, &ast.GlobalNode{0, "GLOBAL_STR", data.String("a")}, nil},
-		&ast.PrintNode{0, &ast.GlobalNode{0, "app.GLOBAL", data.String("b")}, nil},
+		&ast.PrintNode{0, &ast.GlobalNode{0, "GLOBAL_STR", nil}, nil},
+		&ast.PrintNode{0, &ast.GlobalNode{0, "app.GLOBAL", nil}, nil},
 	)},
 
 	{"expression1", "{not false and (isFirst($foo) or (-$x - 5) > 3.1)}", tFile(&ast.PrintNode{0, &ast.AndNode{bin(
@@ -302,7 +315,7 @@ var parseTests = []parseTest{
 
 	{"for", `
 {for $i in range(1, $items.length + 1)}
-  {msg desc="Numbered item."}
+  {msg meaning="verb" desc="Numbered item."}
     {$i}: {$items[$i - 1]}{\n}
   {/msg}
 {/for}`, tFile(
@@ -313,17 +326,21 @@ var parseTests = []parseTest{
 					&ast.DataRefNode{0, "items", []ast.Node{&ast.DataRefKeyNode{0, false, "length"}}},
 					&ast.IntNode{0, 1})}}},
 			tList(
-				&ast.MsgNode{0, "Numbered item.", tList(
-					&ast.PrintNode{0, &ast.DataRefNode{0, "i", nil}, nil},
-					newText(0, ": "),
-					&ast.PrintNode{0, &ast.DataRefNode{0, "items", []ast.Node{
-						&ast.DataRefExprNode{0, false,
-							&ast.SubNode{bin(
-								&ast.DataRefNode{0, "i", nil},
-								&ast.IntNode{0, 1})}}}}, nil},
+				&ast.MsgNode{0, 0, "verb", "Numbered item.", tList(
+					&ast.MsgPlaceholderNode{0, "",
+						&ast.PrintNode{0, &ast.DataRefNode{0, "i", nil}, nil}},
 
-					newText(0, "\n"), // {\n}
-				)}),
+					newText(0, ": "),
+					&ast.MsgPlaceholderNode{0, "",
+						&ast.PrintNode{0, &ast.DataRefNode{0, "items", []ast.Node{
+							&ast.DataRefExprNode{0, false,
+								&ast.SubNode{bin(
+									&ast.DataRefNode{0, "i", nil},
+									&ast.IntNode{0, 1})}}}}, nil}},
+
+					newText(0, "\n"),
+				)},
+			),
 			nil},
 	)},
 
@@ -358,23 +375,25 @@ var parseTests = []parseTest{
 		&ast.CallNode{0, ".booTemplate_", false, nil, nil},
 		&ast.CallNode{0, "foo.goo.mooTemplate", true, nil, nil},
 		&ast.CallNode{0, ".zooTemplate", false, &ast.DataRefNode{0, "animals", nil}, []ast.Node{
-			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}},
-			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo"))},
-			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo"))}}},
+			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}, ""},
+			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo")), ""},
+			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo")), "html"}}},
 		&ast.CallNode{0, "a.long.template.booTemplate_", false, nil, nil},
 		&ast.CallNode{0, ".zooTemplate", false, &ast.DataRefNode{0, "animals", nil}, []ast.Node{
-			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}},
-			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo"))},
-			&ast.CallParamValueNode{0, "zoo", &ast.IntNode{0, 0}},
-			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo"))}}},
+			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}, ""},
+			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo")), ""},
+			&ast.CallParamValueNode{0, "zoo", &ast.IntNode{0, 0}, ""},
+			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo")), "html"}}},
 	)},
 
 	{"let", `
 {let $alpha: $boo.foo /}
 {let $beta}Boo!{/let}
+{let $gamma kind="text"}BOO{/let}
 `, /*{let $delta kind="html"}Boo!{/let}*/ tFile(
 		&ast.LetValueNode{0, "alpha", &ast.DataRefNode{0, "boo", []ast.Node{&ast.DataRefKeyNode{0, false, "foo"}}}},
 		&ast.LetContentNode{0, "beta", tList(newText(0, "Boo!"))},
+		&ast.LetContentNode{0, "gamma", tList(newText(0, "BOO"))},
 	)},
 
 	{"comments", `
@@ -394,16 +413,74 @@ var parseTests = []parseTest{
 	{"alias", `{alias a.b.c}{call c.d/}`, tFile(
 		&ast.CallNode{0, "a.b.c.d", false, nil, nil},
 	)},
-}
 
-var globals = data.Map{
-	"GLOBAL_STR": data.String("a"),
-	"app.GLOBAL": data.String("b"),
+	{"msg html", `
+{msg desc=""}
+  <A > {$i} </a name="foo" phname="custom_ph">{\n} <br/>
+  <h2> my <b>heading </b><input
+><input
+name="foo">
+{/msg}`, tFile(
+		&ast.MsgNode{0, 0, "", "", tList(
+			htmltag("<A >"),
+			newText(0, " "),
+			&ast.MsgPlaceholderNode{0, "", &ast.PrintNode{0, &ast.DataRefNode{0, "i", nil}, nil}},
+			newText(0, " "),
+			htmltag(`</a name="foo" phname="custom_ph">`),
+			newText(0, "\n"),
+			newText(0, " "),
+			htmltag("<br/>"),
+			htmltag("<h2>"),
+			newText(0, " my "),
+			htmltag("<b>"),
+			newText(0, "heading "),
+			htmltag("</b>"),
+			htmltag("<input>"), // due to line joining
+			htmltag("<input name=\"foo\">"),
+		)},
+	)},
+
+	// BUG: This test should pass. Fix is not easy.
+	// 	{"msg dataref + html", `
+	// {msg desc=""}
+	//   <a href="{$link}"></a>
+	// {/msg}`, tFile(
+	// 		&ast.MsgNode{0, 0, "", "", []ast.Node{
+	// 			&ast.MsgPlaceholderNode{0, "", tList(
+	// 				newText(0, `<a href="`),
+	// 				&ast.PrintNode{0, &ast.DataRefNode{0, "link", nil}, nil},
+	// 				newText(0, `">`),
+	// 			)},
+	// 			htmltag("</a>"),
+	// 		}},
+	// )},
+
+	{"plural", `
+	{msg desc=""}
+    {plural length($users)}
+      {case 1}
+        1 user
+      {default}
+        {length($users)} users
+    {/plural}
+	{/msg}`, tFile(
+		&ast.MsgNode{0, 0, "", "", tList(
+			&ast.MsgPluralNode{0, "",
+				&ast.FunctionNode{0, "length", []ast.Node{&ast.DataRefNode{0, "users", nil}}},
+				[]*ast.MsgPluralCaseNode{{0, 1, tList(newText(0, "1 user"))}},
+				tList(&ast.MsgPlaceholderNode{0, "",
+					&ast.PrintNode{0,
+						&ast.FunctionNode{0, "length", []ast.Node{&ast.DataRefNode{0, "users", nil}}}, nil}},
+					newText(0, " users"),
+				),
+			},
+		)},
+	)},
 }
 
 func TestParse(t *testing.T) {
 	for _, test := range parseTests {
-		tmpl, err := SoyFile(test.name, test.input, globals)
+		tmpl, err := SoyFile(test.name, test.input)
 
 		switch {
 		// case err == nil && !test.ok:
@@ -534,16 +611,31 @@ func eqTree(t *testing.T, expected, actual ast.Node) bool {
 		return eqTree(t, expected.(*ast.PrintNode).Arg, actual.(*ast.PrintNode).Arg)
 	case *ast.MsgNode:
 		return eqstr(t, "msg", expected.(*ast.MsgNode).Desc, actual.(*ast.MsgNode).Desc) &&
+			eqstr(t, "msg", expected.(*ast.MsgNode).Meaning, actual.(*ast.MsgNode).Meaning) &&
 			eqTree(t, expected.(*ast.MsgNode).Body, actual.(*ast.MsgNode).Body)
+	case *ast.MsgPlaceholderNode:
+		return eqTree(t, expected.(*ast.MsgPlaceholderNode).Body, actual.(*ast.MsgPlaceholderNode).Body)
+	case *ast.MsgHtmlTagNode:
+		return eqstr(t, "msghtmltag", string(expected.(*ast.MsgHtmlTagNode).Text), string(actual.(*ast.MsgHtmlTagNode).Text))
+	case *ast.MsgPluralNode:
+		return eqTree(t, expected.(*ast.MsgPluralNode).Value, actual.(*ast.MsgPluralNode).Value) &&
+			eqNodes(t, expected.(*ast.MsgPluralNode).Cases, actual.(*ast.MsgPluralNode).Cases) &&
+			eqTree(t, expected.(*ast.MsgPluralNode).Default, actual.(*ast.MsgPluralNode).Default)
+	case *ast.MsgPluralCaseNode:
+		return eqTree(t, expected.(*ast.MsgPluralCaseNode).Body, actual.(*ast.MsgPluralCaseNode).Body) &&
+			eqint(t, "case value", int64(expected.(*ast.MsgPluralCaseNode).Value), int64(actual.(*ast.MsgPluralCaseNode).Value))
+
 	case *ast.CallNode:
 		return eqstr(t, "call", expected.(*ast.CallNode).Name, actual.(*ast.CallNode).Name) &&
 			eqTree(t, expected.(*ast.CallNode).Data, actual.(*ast.CallNode).Data) &&
 			eqNodes(t, expected.(*ast.CallNode).Params, actual.(*ast.CallNode).Params)
 	case *ast.CallParamValueNode:
 		return eqstr(t, "param", expected.(*ast.CallParamValueNode).Key, actual.(*ast.CallParamValueNode).Key) &&
+			eqstr(t, "param", expected.(*ast.CallParamValueNode).Kind, actual.(*ast.CallParamValueNode).Kind) &&
 			eqTree(t, expected.(*ast.CallParamValueNode).Value, actual.(*ast.CallParamValueNode).Value)
 	case *ast.CallParamContentNode:
 		return eqstr(t, "param", expected.(*ast.CallParamContentNode).Key, actual.(*ast.CallParamContentNode).Key) &&
+			eqstr(t, "param", expected.(*ast.CallParamContentNode).Kind, actual.(*ast.CallParamContentNode).Kind) &&
 			eqTree(t, expected.(*ast.CallParamContentNode).Content, actual.(*ast.CallParamContentNode).Content)
 
 	case *ast.IfNode:
@@ -562,6 +654,11 @@ func eqTree(t *testing.T, expected, actual ast.Node) bool {
 	case *ast.SwitchCaseNode:
 		return eqTree(t, expected.(*ast.SwitchCaseNode).Body, actual.(*ast.SwitchCaseNode).Body) &&
 			eqNodes(t, expected.(*ast.SwitchCaseNode).Values, actual.(*ast.SwitchCaseNode).Values)
+	case *ast.ParamDeclNode:
+		return eqstr(t, "Name", expected.(*ast.ParamDeclNode).Name, actual.(*ast.ParamDeclNode).Name) &&
+			eqstr(t, "Type", expected.(*ast.ParamDeclNode).Type, actual.(*ast.ParamDeclNode).Type) &&
+			eqbool(t, "Optional", expected.(*ast.ParamDeclNode).Optional, actual.(*ast.ParamDeclNode).Optional)
+
 	}
 	panic(fmt.Sprintf("type not implemented: %T", actual))
 }
@@ -606,7 +703,6 @@ func eqBinOp(t *testing.T, n1, n2 interface{}) bool {
 func eqNodes(t *testing.T, expected, actual interface{}) bool {
 	a, e := reflect.ValueOf(actual), reflect.ValueOf(expected)
 	if a.Kind() != reflect.Slice || e.Kind() != reflect.Slice {
-		panic("whoops")
 	}
 	if a.Len() != e.Len() {
 		t.Errorf("lengths not equal: expected %v got %v", e.Len(), a.Len())
@@ -646,6 +742,22 @@ func printTree(t *testing.T, n ast.Node, depth int) {
 			//t.Logf("does not implement: %T", f.Interface())
 		}
 	}
+}
+
+func TestPlural(t *testing.T) {
+	// Content outside of plural cases
+	works(t, `{msg desc=""}{plural $n}{default}{/plural}{/msg}`)
+	fails(t, `{msg desc=""}{plural $n}No content allowed{default}{/plural}{/msg}`)
+	works(t, `{msg desc=""}{plural $n} {default}{/plural}{/msg}`)
+	works(t, `{msg desc=""}{plural $n} /* whitespace and comments ok */ {default}{/plural}{/msg}`)
+
+	// Content in msg outside plural
+	fails(t, `{msg desc=""}{plural $n}{default}{/plural}after{/msg}`)
+	fails(t, `{msg desc=""}before{plural $n}{default}{/plural}{/msg}`)
+
+	// Default case required
+	fails(t, `{msg desc=""}{plural $n}{/plural}{/msg}`)
+	fails(t, `{msg desc=""}{plural $n}{case 1}one{/plural}{/msg}`)
 }
 
 // Parser tests imported from the official Soy project
@@ -758,8 +870,12 @@ func TestRecognizeCommands(t *testing.T) {
 	// TODO: implement well-formed HTML checks.
 	// fails(t, "{msg desc=\"\"}<a href=http://www.google.com{/msg}")
 
-	// TODO: disallow nested message tags
-	// fails(t, "{msg desc=\"\"}blah{msg desc=\"\"}bleh{/msg}bluh{/msg}")
+	// Within a message tag, some are not allowed: {msg}, {for}, {foreach}, {switch}, {if}
+	fails(t, "{msg desc=\"\"}blah{msg desc=\"\"}bleh{/msg}bluh{/msg}")
+	fails(t, "{msg desc=\"\"}{foreach $item in $items}{/foreach}{/msg}")
+	fails(t, "{msg desc=\"\"}{for $i in range(5)}{/for}{/msg}")
+	fails(t, "{msg desc=\"\"}{switch}{/switch}{/msg}")
+	fails(t, "{msg desc=\"\"}{if $i}{/if}{/msg}")
 
 	fails(t, "{msg desc=\"\"}blah{/msg blah}")
 	fails(t, "{namespace}")
@@ -810,15 +926,45 @@ func TestRecognizeComments(t *testing.T) {
 	fails(t, "{nil}//}\n")
 }
 
+// regression: ensures that the lexer is drained (and thus its run goroutine cleaned up) on an aborted parse.
+func TestDrainsLexer(t *testing.T) {
+	var (
+		name  = ""
+		text  = "{namespace template alias if}"
+		lexer = lex(name, text)
+		tree  = &tree{
+			name:    name,
+			text:    text,
+			aliases: make(map[string]string),
+			lex:     lexer,
+		}
+		err error
+	)
+
+	func() {
+		defer tree.recover(&err)
+		tree.root = tree.itemList(itemEOF)
+	}()
+
+	if err == nil {
+		t.Error("expected error")
+	}
+
+	token, ok := <-lexer.items
+	if ok {
+		t.Errorf("input was not drained; got %v", token)
+	}
+}
+
 func works(t *testing.T, body string) {
-	_, err := SoyFile("", body, nil)
+	_, err := SoyFile("", body)
 	if err != nil {
 		t.Error(err)
 	}
 }
 
 func fails(t *testing.T, body string) {
-	_, err := SoyFile("", body, nil)
+	_, err := SoyFile("", body)
 	if err == nil {
 		t.Errorf("should fail: %s", body)
 	}

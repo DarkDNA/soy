@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/robertkrimen/otto"
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/parse"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/parse"
+	"github.com/DarkDNA/soy/template"
 )
 
 func TestGenerator(t *testing.T) {
@@ -31,7 +31,7 @@ soy.$$escapeHtml = function(arg) { return arg; };
 {template .funcs}
 {let $place: 'world'/}
 {capitalize('hel' + 'lo')}, {capitalize($place)}
-{/template}`, nil)
+{/template}`)
 	if err != nil {
 		t.Error(err)
 		return

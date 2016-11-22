@@ -8,9 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/parse"
-	"github.com/robfig/soy/template"
+	"github.com/robfig/gettext/po"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/parse"
+	"github.com/DarkDNA/soy/parsepasses"
+	"github.com/DarkDNA/soy/soymsg"
+	"github.com/DarkDNA/soy/template"
 )
 
 type d map[string]interface{}
@@ -668,6 +672,23 @@ func TestLetScopes(t *testing.T) {
 {sp}{$y}
 {/template}
 `, "9 8 7", m, true},
+
+		{"no-overwrite-map-params", "test.main", `{namespace test}
+/** @param z */
+{template .main}
+{call .inner data="$z"}
+{param foo: false /}
+{/call}
+{/template}
+
+/** @param y */
+{template .inner}
+{let $a: 8/}
+{$y} {$a}
+{let $y: 7/}
+{sp}{$y}
+{/template}
+`, "9 8 7", m, true},
 	})
 
 	if !reflect.DeepEqual(m, mcopy) {
@@ -774,6 +795,222 @@ func TestCallData(t *testing.T) {
 	})
 }
 
+type fakeBundle struct {
+	msgs       map[uint64]*soymsg.Message
+	pluralfunc po.PluralSelector
+}
+
+func (fb *fakeBundle) Message(id uint64) *soymsg.Message {
+	if fb == nil || fb.msgs == nil {
+		return nil
+	}
+	return fb.msgs[id]
+}
+
+func (fb *fakeBundle) Locale() string {
+	return "xx"
+}
+
+func (fb *fakeBundle) PluralCase(n int) int {
+	return fb.pluralfunc(n)
+}
+
+func pluralEnglish(n int) int {
+	if n == 1 {
+		return 0
+	}
+	return 1
+}
+
+func pluralCzech(n int) int {
+	switch {
+	case n == 1:
+		return 0
+	case n >= 2 && n <= 4:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func newFakeBundle(msg, tran string, pl po.PluralSelector) *fakeBundle {
+	var sf, err = parse.SoyFile("", `{msg desc=""}`+msg+`{/msg}`)
+	if err != nil {
+		panic(err)
+	}
+	var msgnode = sf.Body[0].(*ast.MsgNode)
+	soymsg.SetPlaceholdersAndID(msgnode)
+	var m = soymsg.NewMessage(msgnode.ID, tran)
+	return &fakeBundle{map[uint64]*soymsg.Message{msgnode.ID: m}, pl}
+}
+
+func newFakePluralBundle(pluralVar, msg1, msg2 string, pl po.PluralSelector, msgstr []string) *fakeBundle {
+	var sf, err = parse.SoyFile("", `{msg desc=""}
+{plural `+pluralVar+`}
+  {case 1}`+msg1+`
+  {default}`+msg2+`
+{/plural}
+{/msg}`)
+	if err != nil {
+		panic(err)
+	}
+	var msgnode = sf.Body[0].(*ast.MsgNode)
+	soymsg.SetPlaceholdersAndID(msgnode)
+	var msg = newMessage(msgnode, msgstr)
+	return &fakeBundle{map[uint64]*soymsg.Message{msgnode.ID: &msg}, pl}
+}
+
+func newMessage(node *ast.MsgNode, msgstrs []string) soymsg.Message {
+	var cases []soymsg.PluralCase
+	for _, msgstr := range msgstrs {
+		// TODO: Ideally this would convert from PO plural form to CLDR plural class.
+		// Instead, just use PluralCase() to select one of these.
+		cases = append(cases, soymsg.PluralCase{
+			Spec:  soymsg.PluralSpec{soymsg.PluralSpecOther, -1}, // not used
+			Parts: soymsg.Parts(msgstr),
+		})
+	}
+	return soymsg.Message{node.ID, []soymsg.Part{soymsg.PluralPart{
+		VarName: node.Body.Children()[0].(*ast.MsgPluralNode).VarName,
+		Cases:   cases,
+	}}}
+}
+
+func TestMessages(t *testing.T) {
+	runNsExecTests(t, []nsExecTest{
+		{"no bundle", "test.main", []string{`{namespace test}
+{template .main}
+  {msg desc=""}
+    Hello world
+  {/msg}
+{/template}`}, "Hello world", nil, nil, true},
+
+		{"bundle lacks", "test.main", []string{`{namespace test}
+{template .main}
+  {msg desc=""}
+    Hello world
+  {/msg}
+{/template}`}, "Hello world", nil, newFakeBundle("foo", "bar", nil), true},
+
+		{"bundle has", "test.main", []string{`{namespace test}
+{template .main}
+  {msg desc=""}
+    Hello world
+  {/msg}
+{/template}`}, "Sup", nil, newFakeBundle("Hello world", "Sup", nil), true},
+
+		{"msg with variable & translation", "test.main", []string{`{namespace test}
+/** @param a */
+{template .main}
+  {msg desc=""}
+    a: {$a}
+  {/msg}
+{/template}`}, "a is 1", d{"a": 1}, newFakeBundle("a: {$a}", "a is {A}", nil), true},
+
+		{"msg w variables", "test.main", []string{`{namespace test}
+/** @param a */
+{template .main}
+  {msg desc=""}
+    {$a}{$a} xx {$a}{sp}
+  {/msg}
+{/template}`}, "11xxx1", d{"a": 1}, newFakeBundle("{$a}{$a} xx {$a}{sp}", "{A}{A}xxx{A}", nil), true},
+
+		{"msg w numbered placeholders", "test.main", []string{`{namespace test}
+/** @param a */
+{template .main}
+  {msg desc=""}
+    {$a.a}{$a.b.a}
+  {/msg}
+{/template}`}, "21", d{"a": d{"a": 1, "b": d{"a": 2}}},
+			newFakeBundle("{$a.a}{$a.b.a}", "{A_2}{A_1}", nil), true},
+
+		{"msg w html", "test.main", []string{`{namespace test}
+/** @param a */
+{template .main}
+  {msg desc=""}
+    Click <a>here</a>
+  {/msg}
+{/template}`}, "<a>Click here</a>", nil,
+			newFakeBundle("Click <a>here</a>", "{START_LINK}Click here{END_LINK}", nil), true},
+
+		{"plural, not found, singular", "test.main", []string{`{namespace test}
+/** @param n */
+{template .main}
+  {msg desc=""}
+    {plural $n}
+    {case 1}
+      one user
+    {default}
+      {$n} users
+    {/plural}
+  {/msg}
+{/template}`}, "one user", d{"n": 1},
+			nil, true},
+
+		{"plural, not found, plural", "test.main", []string{`{namespace test}
+/** @param n */
+{template .main}
+  {msg desc=""}
+    {plural $n}
+    {case 1}
+      one user
+    {default}
+      {$n} users
+    {/plural}
+  {/msg}
+{/template}`}, "11 users", d{"n": 11},
+			nil, true},
+
+		{"plural, singular", "test.main", []string{`{namespace test}
+/** @param n */
+{template .main}
+  {msg desc=""}
+    {plural $n}
+    {case 1}
+      one user
+    {default}
+      {$n} users
+    {/plural}
+  {/msg}
+{/template}`}, "|one user|", d{"n": 1},
+			newFakePluralBundle("$n", "one user", "{$n} users",
+				pluralEnglish, []string{"|one user|", "|({N_2}) users|"}),
+			true},
+
+		{"plural, plural", "test.main", []string{`{namespace test}
+/** @param n */
+{template .main}
+  {msg desc=""}
+    {plural $n}
+    {case 1}
+      one user
+    {default}
+      {$n} users
+    {/plural}
+  {/msg}
+{/template}`}, "|(10) users|", d{"n": 10},
+			newFakePluralBundle("$n", "one user", "{$n} users",
+				pluralEnglish, []string{"|one user|", "|({N_2}) users|"}),
+			true},
+
+		{"plural, few, czech", "test.main", []string{`{namespace test}
+/** @param n */
+{template .main}
+  {msg desc=""}
+    {plural $n}
+    {case 1}
+      one user
+    {default}
+      {$n} users
+    {/plural}
+  {/msg}
+{/template}`}, "|few (3) users|", d{"n": 3},
+			newFakePluralBundle("$n", "one user", "{$n} users",
+				pluralCzech, []string{"|one user|", "|few ({N_2}) users|", "|({N_2}) users|"}),
+			true},
+	})
+}
+
 // testing cross namespace stuff requires multiple file bodies
 type nsExecTest struct {
 	name         string
@@ -781,6 +1018,7 @@ type nsExecTest struct {
 	input        []string
 	output       string
 	data         interface{}
+	msgs         *fakeBundle
 	ok           bool
 }
 
@@ -800,7 +1038,7 @@ func TestAlias(t *testing.T) {
 {template .hello}
 Hello world
 {/template}`},
-			"Hello world", nil, true},
+			"Hello world", nil, nil, true},
 	})
 }
 
@@ -868,6 +1106,7 @@ func runExecTests(t *testing.T, tests []execTest) {
 			[]string{test.input},
 			test.output,
 			test.data,
+			nil,
 			test.ok,
 		})
 	}
@@ -879,22 +1118,27 @@ func runNsExecTests(t *testing.T, tests []nsExecTest) {
 	for _, test := range tests {
 		var registry = template.Registry{}
 		for _, input := range test.input {
-			var tree, err = parse.SoyFile("", input, globals)
+			var tree, err = parse.SoyFile("", input)
 			if err != nil {
 				t.Errorf("%s: parse error: %s", test.name, err)
 				continue
 			}
 			registry.Add(tree)
 		}
+		parsepasses.SetGlobals(registry, globals)
+		parsepasses.ProcessMessages(registry)
 
 		b.Reset()
 		var datamap data.Map
 		if test.data != nil {
 			datamap = data.New(test.data).(data.Map)
 		}
-		err := NewTofu(&registry).NewRenderer(test.templateName).
-			Inject(ij).
-			Execute(b, datamap)
+		tofu := NewTofu(&registry).NewRenderer(test.templateName).
+			Inject(ij)
+		if test.msgs != nil {
+			tofu.WithMessages(test.msgs)
+		}
+		err := tofu.Execute(b, datamap)
 		switch {
 		case !test.ok && err == nil:
 			t.Errorf("%s: expected error; got none", test.name)
