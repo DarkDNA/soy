@@ -4,8 +4,8 @@ package parsepasses
 import (
 	"fmt"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/template"
 )
 
 // CheckDataRefs validates that:
@@ -42,6 +42,7 @@ func CheckDataRefs(reg template.Registry) (err error) {
 type templateChecker struct {
 	registry template.Registry
 	params   []string
+	paramTypes []string
 	letVars  []string
 	forVars  []string
 	usedKeys []string
@@ -49,14 +50,22 @@ type templateChecker struct {
 
 func newTemplateChecker(reg template.Registry, params []*ast.SoyDocParamNode) *templateChecker {
 	var paramNames []string
+	var paramTypes []string
+
 	for _, param := range params {
+		paramTypes = append(paramTypes, "any")
 		paramNames = append(paramNames, param.Name)
 	}
-	return &templateChecker{reg, paramNames, nil, nil, nil}
+	return &templateChecker{reg, paramNames, paramTypes, nil, nil, nil}
 }
 
 func (tc *templateChecker) checkTemplate(node ast.Node) {
 	switch node := node.(type) {
+	case *ast.ParamDeclNode:
+		tc.checkParamType(node.Type)
+
+		tc.paramTypes = append(tc.paramTypes, node.Type)
+		tc.params = append(tc.params, node.Name)
 	case *ast.LetValueNode:
 		tc.checkLet(node.Name)
 		tc.letVars = append(tc.letVars, node.Name)
@@ -82,6 +91,10 @@ func (tc *templateChecker) checkLet(varName string) {
 	}
 }
 
+func (tx *templateChecker) checkParamType(typ string) {
+	// does nothing.
+}
+
 func (tc *templateChecker) checkCall(node *ast.CallNode) {
 	var callee, ok = tc.registry.Template(node.Name)
 	if !ok {
@@ -94,6 +107,16 @@ func (tc *templateChecker) checkCall(node *ast.CallNode) {
 		allCalleeParamNames = append(allCalleeParamNames, param.Name)
 		if !param.Optional {
 			requiredCalleeParamNames = append(requiredCalleeParamNames, param.Name)
+		}
+	}
+
+	// Handle {@param ...} syntax params.
+	for _, node := range callee.Node.Body.Children() {
+		if param, ok := node.(*ast.ParamDeclNode); ok {
+			allCalleeParamNames = append(allCalleeParamNames, param.Name)
+			if !param.Optional {
+				requiredCalleeParamNames = append(requiredCalleeParamNames, param.Name)
+			}
 		}
 	}
 

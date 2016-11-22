@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	"github.com/robertkrimen/otto"
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/soyjs"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/soyjs"
 )
 
 type d map[string]interface{}
@@ -131,6 +131,14 @@ BB<br>` +
 			`Oz took a trip to Winkie Country.<br>`},
 
 	{"demoCallWithParamBlock", d{"name": "Quo"}, `Quo took a trip to Zurich.<br>`},
+	{"demoParamWithKindAttribute", d{
+		"message": "Hello World",
+		"list": []string{
+			"cake", "pie",
+		}},
+		`<div><div><b>Hello World</b></div>` +
+			`<ol><li>cake</li><li>pie</li></ol>` +
+			`</div>`},
 
 	{"demoExpressions", d{
 		"currentYear": 2008,
@@ -193,7 +201,7 @@ func BenchmarkLexParseFeatures(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var _, err = NewBundle().
-			AddGlobalsFile("testdata/FeaturesUsage_globals.txt").
+			AddGlobalsFile("third_party/go/soy/"+"testdata/FeaturesUsage_globals.txt").
 			AddTemplateString("", features).
 			AddTemplateString("", simple).
 			Compile()
@@ -209,7 +217,7 @@ func BenchmarkExecuteFeatures(b *testing.B) {
 		simple   = mustReadFile("testdata/simple.soy")
 	)
 	var tofu, err = NewBundle().
-		AddGlobalsFile("testdata/FeaturesUsage_globals.txt").
+		AddGlobalsFile("third_party/go/soy/"+"testdata/FeaturesUsage_globals.txt").
 		AddTemplateString("", features).
 		AddTemplateString("", simple).
 		CompileToTofu()
@@ -365,9 +373,9 @@ some {{.foo}}, some {{.bar}}, more {{.baz}}
 func TestFeaturesJavascript(t *testing.T) {
 	rand.Seed(14)
 	var registry, err = NewBundle().
-		AddGlobalsFile("testdata/FeaturesUsage_globals.txt").
-		AddTemplateFile("testdata/simple.soy").
-		AddTemplateFile("testdata/features.soy").
+		AddGlobalsFile("third_party/go/soy/" + "testdata/FeaturesUsage_globals.txt").
+		AddTemplateFile("third_party/go/soy/" + "testdata/simple.soy").
+		AddTemplateFile("third_party/go/soy/" + "testdata/features.soy").
 		Compile()
 	if err != nil {
 		t.Error(err)
@@ -407,7 +415,7 @@ func TestFeaturesJavascript(t *testing.T) {
 
 func initJs(t *testing.T) *otto.Otto {
 	var otto = otto.New()
-	soyutilsFile, err := os.Open("soyjs/lib/soyutils.js")
+	soyutilsFile, err := os.Open("third_party/go/soy/" + "soyjs/lib/soyutils.js")
 	if err != nil {
 		panic(err)
 	}
@@ -440,9 +448,9 @@ func initJs(t *testing.T) *otto.Otto {
 func runFeatureTests(t *testing.T, tests []featureTest) {
 	var features = mustReadFile("testdata/features.soy")
 	var tofu, err = NewBundle().
-		AddGlobalsFile("testdata/FeaturesUsage_globals.txt").
+		AddGlobalsFile("third_party/go/soy/"+"testdata/FeaturesUsage_globals.txt").
 		AddTemplateString("", features).
-		AddTemplateFile("testdata/simple.soy").
+		AddTemplateFile("third_party/go/soy/" + "testdata/simple.soy").
 		CompileToTofu()
 	if err != nil {
 		t.Error(err)
@@ -464,7 +472,7 @@ func runFeatureTests(t *testing.T, tests []featureTest) {
 }
 
 func mustReadFile(filename string) string {
-	f, err := os.Open(filename)
+	f, err := os.Open("third_party/go/soy/" + filename)
 	if err != nil {
 		panic(err)
 	}

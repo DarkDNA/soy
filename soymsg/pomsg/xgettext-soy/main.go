@@ -10,11 +10,11 @@ import (
 	"strings"
 
 	"github.com/robfig/gettext/po"
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/parse"
-	"github.com/robfig/soy/parsepasses"
-	"github.com/robfig/soy/soymsg/pomsg"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/parse"
+	"github.com/DarkDNA/soy/parsepasses"
+	"github.com/DarkDNA/soy/soymsg/pomsg"
+	"github.com/DarkDNA/soy/template"
 )
 
 func usage() {

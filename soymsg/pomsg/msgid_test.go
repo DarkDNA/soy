@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/parse"
-	"github.com/robfig/soy/soymsg"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/parse"
+	"github.com/DarkDNA/soy/soymsg"
 )
 
 func TestValidate(t *testing.T) {

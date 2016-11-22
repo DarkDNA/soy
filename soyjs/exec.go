@@ -9,9 +9,9 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/soymsg"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/soymsg"
 )
 
 type state struct {
@@ -391,13 +391,34 @@ func (s *state) visitCall(node *ast.CallNode) {
 			}
 			switch param := param.(type) {
 			case *ast.CallParamValueNode:
-				dataExpr += param.Key + ": " + s.block(param.Value)
+				dataExpr += param.Key + ": "
+				switch param.Kind {
+				case "html":
+					dataExpr += "new soydata.VERY_UNSAFE.ordainSanitizedHtml(" + s.block(param.Value) + ")"
+				case "js":
+					dataExpr += "new soydata.VERY_UNSAFE.ordainSanitizedJs(" + s.block(param.Value) + ")"
+				default:
+					dataExpr += s.block(param.Value)
+				}
+
 			case *ast.CallParamContentNode:
 				var oldBufferName = s.bufferName
 				s.bufferName = s.scope.makevar("param")
 				s.jsln("var ", s.bufferName, " = '';")
 				s.walk(param.Content)
-				dataExpr += param.Key + ": " + s.bufferName
+				dataExpr += param.Key + ": "
+
+				switch param.Kind {
+				case "html":
+					dataExpr += "new soydata.VERY_UNSAFE.ordainSanitizedHtml(" + s.bufferName + ")"
+
+				case "js":
+					dataExpr += "new soydata.VERY_UNSAFE.ordainSanitizedJs(" + s.bufferName + ")"
+
+				default:
+					dataExpr += s.bufferName
+				}
+
 				s.bufferName = oldBufferName
 			}
 		}

@@ -9,12 +9,12 @@ import (
 	"testing"
 
 	"github.com/robfig/gettext/po"
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/parse"
-	"github.com/robfig/soy/parsepasses"
-	"github.com/robfig/soy/soymsg"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/parse"
+	"github.com/DarkDNA/soy/parsepasses"
+	"github.com/DarkDNA/soy/soymsg"
+	"github.com/DarkDNA/soy/template"
 )
 
 type d map[string]interface{}

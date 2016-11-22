@@ -4,8 +4,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/robfig/soy/soymsg"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/soymsg"
+	"github.com/DarkDNA/soy/template"
 )
 
 // Options for js source generation.

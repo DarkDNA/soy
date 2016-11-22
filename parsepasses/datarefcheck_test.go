@@ -3,9 +3,9 @@ package parsepasses
 import (
 	"testing"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/parse"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/parse"
+	"github.com/DarkDNA/soy/template"
 )
 
 type checkerTest struct {
@@ -37,6 +37,11 @@ Hello world
 		{`
 /** @param paramName */
 {template .paramOnly}
+Hello {$paramName}
+{/template}`, true},
+		{`
+{template .paramDeclOnly}
+{@param paramName: string}
 Hello {$paramName}
 {/template}`, true},
 
@@ -193,6 +198,18 @@ func TestAllCallParamsAreDeclaredByCallee(t *testing.T) {
   {$param1} {$param2}
 {/template}
 `, true},
+	{`
+{template .ParamDeclPresent}
+  {call .Other}
+    {param param1: 0/}
+    {param param2}hello{/param}
+  {/call}
+{/template}
+{template .Other}
+  {@param param1: int}
+  {@param param2: string}
+  {$param1} {$param2}
+{/template}`, true},
 
 		{`
 /** */

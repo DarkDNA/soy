@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/robfig/soy/ast"
+	"github.com/DarkDNA/soy/ast"
 )
 
 type parseTest struct {
@@ -95,6 +95,16 @@ var parseTests = []parseTest{
 	{"soydoc - one line", "/** @param name */", tFile(&ast.SoyDocNode{0, []*ast.SoyDocParamNode{
 		{0, "name", false},
 	}})},
+	{"param directive", "{template .test}{@param hello: string}{/template}", tFile(&ast.TemplateNode{
+		0, ".test",
+		&ast.ListNode{
+			0,
+			[]ast.Node{
+				&ast.ParamDeclNode{0, false, "hello", "string"},
+			},
+		},
+		ast.AutoescapeUnspecified, false,
+	})},
 
 	{"rawtext (linejoin)", "\n  a \n\tb\r\n  c  \n\n", tFile(newText(0, "a b c"))},
 	{"rawtext+html", "\n  a <br>\n\tb\r\n\n  c\n\n<br> ", tFile(newText(0, "a <br>b c<br> "))},
@@ -365,15 +375,15 @@ var parseTests = []parseTest{
 		&ast.CallNode{0, ".booTemplate_", false, nil, nil},
 		&ast.CallNode{0, "foo.goo.mooTemplate", true, nil, nil},
 		&ast.CallNode{0, ".zooTemplate", false, &ast.DataRefNode{0, "animals", nil}, []ast.Node{
-			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}},
-			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo"))},
-			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo"))}}},
+			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}, ""},
+			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo")), ""},
+			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo")), "html"}}},
 		&ast.CallNode{0, "a.long.template.booTemplate_", false, nil, nil},
 		&ast.CallNode{0, ".zooTemplate", false, &ast.DataRefNode{0, "animals", nil}, []ast.Node{
-			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}},
-			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo"))},
-			&ast.CallParamValueNode{0, "zoo", &ast.IntNode{0, 0}},
-			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo"))}}},
+			&ast.CallParamValueNode{0, "yoo", &ast.FunctionNode{0, "round", []ast.Node{&ast.DataRefNode{0, "too", nil}}}, ""},
+			&ast.CallParamContentNode{0, "woo", tList(newText(0, "poo")), ""},
+			&ast.CallParamValueNode{0, "zoo", &ast.IntNode{0, 0}, ""},
+			&ast.CallParamContentNode{0, "doo", tList(newText(0, "doopoo")), "html"}}},
 	)},
 
 	{"let", `
@@ -621,9 +631,11 @@ func eqTree(t *testing.T, expected, actual ast.Node) bool {
 			eqNodes(t, expected.(*ast.CallNode).Params, actual.(*ast.CallNode).Params)
 	case *ast.CallParamValueNode:
 		return eqstr(t, "param", expected.(*ast.CallParamValueNode).Key, actual.(*ast.CallParamValueNode).Key) &&
+			eqstr(t, "param", expected.(*ast.CallParamValueNode).Kind, actual.(*ast.CallParamValueNode).Kind) &&
 			eqTree(t, expected.(*ast.CallParamValueNode).Value, actual.(*ast.CallParamValueNode).Value)
 	case *ast.CallParamContentNode:
 		return eqstr(t, "param", expected.(*ast.CallParamContentNode).Key, actual.(*ast.CallParamContentNode).Key) &&
+			eqstr(t, "param", expected.(*ast.CallParamContentNode).Kind, actual.(*ast.CallParamContentNode).Kind) &&
 			eqTree(t, expected.(*ast.CallParamContentNode).Content, actual.(*ast.CallParamContentNode).Content)
 
 	case *ast.IfNode:
@@ -642,6 +654,11 @@ func eqTree(t *testing.T, expected, actual ast.Node) bool {
 	case *ast.SwitchCaseNode:
 		return eqTree(t, expected.(*ast.SwitchCaseNode).Body, actual.(*ast.SwitchCaseNode).Body) &&
 			eqNodes(t, expected.(*ast.SwitchCaseNode).Values, actual.(*ast.SwitchCaseNode).Values)
+	case *ast.ParamDeclNode:
+		return eqstr(t, "Name", expected.(*ast.ParamDeclNode).Name, actual.(*ast.ParamDeclNode).Name) &&
+			eqstr(t, "Type", expected.(*ast.ParamDeclNode).Type, actual.(*ast.ParamDeclNode).Type) &&
+			eqbool(t, "Optional", expected.(*ast.ParamDeclNode).Optional, actual.(*ast.ParamDeclNode).Optional)
+
 	}
 	panic(fmt.Sprintf("type not implemented: %T", actual))
 }
@@ -686,7 +703,6 @@ func eqBinOp(t *testing.T, n1, n2 interface{}) bool {
 func eqNodes(t *testing.T, expected, actual interface{}) bool {
 	a, e := reflect.ValueOf(actual), reflect.ValueOf(expected)
 	if a.Kind() != reflect.Slice || e.Kind() != reflect.Slice {
-		panic("whoops")
 	}
 	if a.Len() != e.Len() {
 		t.Errorf("lengths not equal: expected %v got %v", e.Len(), a.Len())

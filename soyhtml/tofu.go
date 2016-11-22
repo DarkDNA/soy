@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/template"
 )
 
 // Tofu is a bundle of compiled soy, ready to render to HTML.

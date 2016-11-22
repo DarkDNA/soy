@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/robfig/soy/data"
+	"github.com/DarkDNA/soy/data"
 )
 
 // Node represents any singular piece of a soy template.  For example, a
@@ -119,6 +119,24 @@ func (n *TemplateNode) String() string {
 
 func (n *TemplateNode) Children() []Node {
 	return []Node{n.Body}
+}
+
+type ParamDeclNode struct {
+	Pos
+
+	Optional bool
+	Name     string
+	Type     string
+}
+
+func (n *ParamDeclNode) String() string {
+	ret := "{@param"
+	if n.Optional {
+		ret += "?"
+	}
+
+	ret += " " + n.Name + ": " + n.Type + "}"
+	return ret
 }
 
 type SoyDocNode struct {
@@ -441,6 +459,7 @@ type CallParamValueNode struct {
 	Pos
 	Key   string
 	Value Node
+	Kind string
 }
 
 func (n *CallParamValueNode) String() string {
@@ -455,6 +474,7 @@ type CallParamContentNode struct {
 	Pos
 	Key     string
 	Content Node
+	Kind string
 }
 
 func (n *CallParamContentNode) String() string {

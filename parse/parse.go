@@ -10,8 +10,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/data"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/data"
 )
 
 // tree is the parsed representation of a single soy file.
@@ -132,6 +132,10 @@ func (t *tree) beginTag() ast.Node {
 		return t.parseNamespace(token)
 	case itemTemplate:
 		return t.parseTemplate(token)
+	case itemDefineParam:
+		return t.parseParamDecl(token, false)
+	case itemDefineOptionalParam:
+		return t.parseParamDecl(token, true)
 	case itemIf:
 		t.notmsg(token)
 		return t.parseIf(token)
@@ -278,6 +282,7 @@ func (t *tree) parseCall(token item) ast.Node {
 	switch tok := t.next(); tok.typ {
 	case itemDotIdent:
 		templateName = tok.val
+
 	case itemIdent:
 		// this ident could either be {call fully.qualified.name} or attributes.
 		switch tok2 := t.next(); tok2.typ {
@@ -324,6 +329,7 @@ func (t *tree) parseCall(token item) ast.Node {
 	switch tok := t.next(); tok.typ {
 	case itemRightDelimEnd:
 		return &ast.CallNode{token.pos, templateName, allData, dataNode, nil}
+
 	case itemRightDelim:
 		body := t.parseCallParams()
 		t.expect(itemLeftDelim, "call")
@@ -380,23 +386,28 @@ func (t *tree) parseCallParams() []ast.Node {
 			key = firstIdent.val
 			value = t.parseExpr(0)
 			t.expect(itemRightDelimEnd, "param")
-			params = append(params, &ast.CallParamValueNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamValueNode{initial.pos, key, value, ""})
 			continue
+
 		case itemRightDelim:
 			key = firstIdent.val
 			value = t.itemList(itemParamEnd)
 			t.expect(itemRightDelim, "param")
-			params = append(params, &ast.CallParamContentNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamContentNode{initial.pos, key, value, ""})
 			continue
+
 		case itemIdent:
 			key = firstIdent.val
 			t.backup()
+
 		case itemEquals:
 			t.backup2(firstIdent)
+
 		default:
 			t.unexpected(tok, "param. (expected ':', '}', or '=')")
 		}
 
+		
 		attrs := t.parseAttrs("key", "value", "kind")
 		var ok bool
 		if key == "" {
@@ -409,11 +420,11 @@ func (t *tree) parseCallParams() []ast.Node {
 			t.expect(itemRightDelim, "param")
 			value = t.itemList(itemParamEnd)
 			t.expect(itemRightDelim, "param")
-			params = append(params, &ast.CallParamContentNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamContentNode{initial.pos, key, value, attrs["kind"]})
 		} else {
 			value = t.parseQuotedExpr(valueStr)
 			t.expect(itemRightDelimEnd, "param")
-			params = append(params, &ast.CallParamValueNode{initial.pos, key, value})
+			params = append(params, &ast.CallParamValueNode{initial.pos, key, value, attrs["kind"]})
 		}
 	}
 }
@@ -518,6 +529,14 @@ func (t *tree) parseIf(token item) ast.Node {
 			return &ast.IfNode{token.pos, conds}
 		}
 	}
+}
+
+func (t *tree) parseParamDecl(token item, optional bool) ast.Node {
+	name := t.expect(itemIdent, "param name")
+	typ := t.expect(itemTypeIdent, "param type")
+	t.expect(itemRightDelim, "right delim")
+
+	return &ast.ParamDeclNode{token.pos, optional, name.val, typ.val}
 }
 
 func (t *tree) parseSoyDoc(token item) ast.Node {

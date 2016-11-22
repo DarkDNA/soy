@@ -8,10 +8,10 @@ import (
 	"runtime"
 	"runtime/debug"
 
-	"github.com/robfig/soy/ast"
-	"github.com/robfig/soy/data"
-	"github.com/robfig/soy/soymsg"
-	soyt "github.com/robfig/soy/template"
+	"github.com/DarkDNA/soy/ast"
+	"github.com/DarkDNA/soy/data"
+	"github.com/DarkDNA/soy/soymsg"
+	soyt "github.com/DarkDNA/soy/template"
 )
 
 // Logger collects output from {log} commands.
@@ -107,6 +107,7 @@ func (s *state) walk(node ast.Node) {
 		Logger.Print(string(s.renderBlock(node.Body)))
 
 		// Control flow ----------
+
 	case *ast.IfNode:
 		for _, cond := range node.Conds {
 			if cond.Cond == nil || s.eval(cond.Cond).Truthy() {
@@ -152,6 +153,8 @@ func (s *state) walk(node ast.Node) {
 		s.evalCall(node)
 	case *ast.LetValueNode:
 		s.context.set(node.Name, s.eval(node.Expr))
+	case *ast.ParamDeclNode:
+		return
 	case *ast.LetContentNode:
 		s.context.set(node.Name, data.String(s.renderBlock(node.Body)))
 
@@ -299,6 +302,11 @@ func (s *state) evalPrint(node *ast.PrintNode) {
 	}
 	var escapeHtml = s.autoescape != ast.AutoescapeOff
 	var result = s.val
+	switch result.(type) {
+	case data.HTML:
+		escapeHtml = false
+	}
+
 	for _, directiveNode := range node.Directives {
 		var directive, ok = PrintDirectives[directiveNode.Name]
 		if !ok {
@@ -469,7 +477,16 @@ func (s *state) evalCall(node *ast.CallNode) {
 		case *ast.CallParamValueNode:
 			callData.set(param.Key, s.eval(param.Value))
 		case *ast.CallParamContentNode:
-			callData.set(param.Key, data.String(s.renderBlock(param.Content)))
+			body := s.renderBlock(param.Content)
+
+			switch param.Kind {
+			case "html":
+				callData.set(param.Key, data.HTML(body))
+
+			default:
+				callData.set(param.Key, data.String(body))
+			}
+
 		default:
 			s.errorf("unexpected call param type: %T", param)
 		}

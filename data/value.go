@@ -17,6 +17,9 @@ type Value interface {
 	// String formats this value for display in a template.
 	String() string
 
+	// Type returns the Soy type of this object.
+	Type() Type
+
 	// Equals returns true if the two values are equal.  Specifically, if:
 	// - They are comparable: they have the same Type, or they are Int and Float
 	// - (Primitives) They have the same value
@@ -34,6 +37,8 @@ type (
 	String    string
 	List      []Value
 	Map       map[string]Value
+
+	HTML string
 )
 
 // Index retrieves a value from this list, or Undefined if out of bounds.
@@ -66,8 +71,24 @@ func (v Bool) Truthy() bool      { return bool(v) }
 func (v Int) Truthy() bool       { return v != 0 }
 func (v Float) Truthy() bool     { return v != 0.0 && float64(v) != math.NaN() }
 func (v String) Truthy() bool    { return v != "" }
-func (v List) Truthy() bool      { return true }
-func (v Map) Truthy() bool       { return true }
+
+func (v List) Truthy() bool { return true }
+func (v Map) Truthy() bool  { return true }
+
+func (v HTML) Truthy() bool    { return v != "" }
+
+// Type ---------
+func (v Undefined) Type() Type { panic("Attempted to coerce undefined value into a type.") }
+func (v Null) Type() Type      { return Type("null") }
+func (v Bool) Type() Type      { return Type("bool") }
+func (v Int) Type() Type       { return Type("int") }
+func (v Float) Type() Type     { return Type("float") }
+func (v String) Type() Type    { return Type("string") }
+
+func (v List) Type() Type { return Type("list<" + v[0].Type() + ">") }
+func (v Map) Type() Type  { return Type("map<any,any>") }
+
+func (v HTML) Type() Type { return "html" }
 
 // String ----------
 
@@ -103,6 +124,8 @@ func (v Map) String() string {
 	return "{" + strings.Join(items, ", ") + "}"
 }
 
+func (v HTML) String() string    { return string(v) }
+
 // Equals ----------
 
 func (v Undefined) Equals(other Value) bool {
@@ -124,6 +147,13 @@ func (v Bool) Equals(other Value) bool {
 
 func (v String) Equals(other Value) bool {
 	if o, ok := other.(String); ok {
+		return string(v) == string(o)
+	}
+	return false
+}
+
+func (v HTML) Equals(other Value) bool {
+	if o, ok := other.(HTML); ok {
 		return string(v) == string(o)
 	}
 	return false

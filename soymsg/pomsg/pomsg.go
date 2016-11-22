@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/robfig/gettext/po"
-	"github.com/robfig/soy/soymsg"
+	"github.com/DarkDNA/soy/soymsg"
 )
 
 type provider struct {
