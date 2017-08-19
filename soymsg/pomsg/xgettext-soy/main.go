@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/robfig/gettext/po"
 	"github.com/DarkDNA/soy/ast"
 	"github.com/DarkDNA/soy/parse"
 	"github.com/DarkDNA/soy/parsepasses"
 	"github.com/DarkDNA/soy/soymsg/pomsg"
 	"github.com/DarkDNA/soy/template"
+	"github.com/robfig/gettext/po"
 )
 
 func usage() {
@@ -100,6 +100,10 @@ func (e extractor) extract(node ast.Node) {
 			Ctxt:     node.Meaning,
 			Id:       pomsg.Msgid(node),
 			IdPlural: pomsg.MsgidPlural(node),
+			Str: []string{
+				pomsg.Msgid(node),
+				pomsg.MsgidPlural(node),
+			},
 		})
 	default:
 		if parent, ok := node.(ast.ParentNode); ok {
