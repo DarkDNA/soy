@@ -48,8 +48,12 @@ func main() {
 	}
 	parsepasses.ProcessMessages(registry)
 
-	var e = extractor{&po.File{}}
+	var e = extractor{
+		file:     &po.File{},
+		registry: registry,
+	}
 	for _, t := range registry.Templates {
+		e.tmpl = t.Node
 		e.extract(t.Node)
 	}
 	e.file.WriteTo(os.Stdout)
@@ -79,7 +83,9 @@ func walkSource(path string, info os.FileInfo, err error) error {
 }
 
 type extractor struct {
-	file *po.File
+	file     *po.File
+	tmpl     *ast.TemplateNode
+	registry template.Registry
 }
 
 func (e extractor) extract(node ast.Node) {
@@ -95,7 +101,10 @@ func (e extractor) extract(node ast.Node) {
 		e.file.Messages = append(e.file.Messages, po.Message{
 			Comment: po.Comment{
 				ExtractedComments: []string{node.Desc},
-				References:        []string{fmt.Sprintf("id=%d%v", node.ID, pluralVar)},
+				References: []string{
+					fmt.Sprintf("%s:%d", e.tmpl.Name,
+						e.registry.LineNumber(e.tmpl.Name, node)),
+					fmt.Sprintf("id=%d%v", node.ID, pluralVar)},
 			},
 			Ctxt:     node.Meaning,
 			Id:       pomsg.Msgid(node),
@@ -105,12 +114,12 @@ func (e extractor) extract(node ast.Node) {
 				pomsg.MsgidPlural(node),
 			},
 		})
-	default:
-		if parent, ok := node.(ast.ParentNode); ok {
-			for _, child := range parent.Children() {
-				e.extract(child)
-			}
+	case ast.ParentNode:
+		for _, child := range node.Children() {
+			e.extract(child)
 		}
+	default:
+		break
 	}
 }
 
