@@ -16,12 +16,14 @@ type Registry struct {
 
 	// sourceByTemplateName maps FQ template name to the input source it came from.
 	sourceByTemplateName map[string]string
+	fileByTemplateName   map[string]string
 }
 
 // Add the given soy file node (and all contained templates) to this registry.
 func (r *Registry) Add(soyfile *ast.SoyFileNode) error {
 	if r.sourceByTemplateName == nil {
 		r.sourceByTemplateName = make(map[string]string)
+		r.fileByTemplateName = make(map[string]string)
 	}
 	var ns *ast.NamespaceNode
 	for _, node := range soyfile.Body {
@@ -56,6 +58,7 @@ func (r *Registry) Add(soyfile *ast.SoyFileNode) error {
 		}
 		r.Templates = append(r.Templates, Template{sdn, tn, ns})
 		r.sourceByTemplateName[tn.Name] = soyfile.Text
+		r.fileByTemplateName[tn.Name] = soyfile.Name
 	}
 	return nil
 }
@@ -69,6 +72,16 @@ func (r *Registry) Template(name string) (Template, bool) {
 		}
 	}
 	return Template{}, false
+}
+
+// SourceFile gets the source file for templateName
+func (r *Registry) SourceFile(templateName string) string {
+	var file, ok = r.fileByTemplateName[templateName]
+	if !ok {
+		log.Println("template not found:", templateName)
+	}
+
+	return file
 }
 
 // LineNumber computes the line number in the input source for the given node

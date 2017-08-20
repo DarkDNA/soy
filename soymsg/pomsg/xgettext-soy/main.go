@@ -102,7 +102,8 @@ func (e extractor) extract(node ast.Node) {
 			Comment: po.Comment{
 				ExtractedComments: []string{node.Desc},
 				References: []string{
-					fmt.Sprintf("%s:%d", e.tmpl.Name,
+					fmt.Sprintf("%s:%d",
+						e.registry.SourceFile(e.tmpl.Name),
 						e.registry.LineNumber(e.tmpl.Name, node)),
 					fmt.Sprintf("id=%d%v", node.ID, pluralVar)},
 			},
